@@ -1,22 +1,18 @@
 from flask import Flask, request, jsonify
 import speech_recognition as sr
 from pydub import AudioSegment
-import os
+from io import BytesIO
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 CORS(app)
 
-# Tạo thư mục uploads nếu nó không tồn tại
-if not os.path.exists('uploads'):
-    os.makedirs('uploads')
-
-def transcribe_audio(audio_path, lang='en-US'):  # Mặc định là tiếng Anh
+def transcribe_audio(audio_data, lang='en-US'):
     recognizer = sr.Recognizer()
-    with sr.AudioFile(audio_path) as source:
+    with sr.AudioFile(audio_data) as source:
         audio = recognizer.record(source)
-        text = recognizer.recognize_google(audio, language=lang)  # Thêm tham số ngôn ngữ
+        text = recognizer.recognize_google(audio, language=lang)
     return text
 
 @app.route('/upload', methods=['POST'])
@@ -33,29 +29,26 @@ def upload():
         return jsonify({"error": "Unsupported file format. Please upload an MP3 or WAV file."}), 400
 
     # Nhận ngôn ngữ từ request
-    lang = request.form.get('language', 'en-US')  # Ngôn ngữ mặc định là tiếng Anh
+    lang = request.form.get('language', 'en-US')
 
-    audio_filename = secure_filename(audio_file.filename)
-    audio_path = os.path.join('uploads', audio_filename)
-    audio_file.save(audio_path)
+    # Đọc tệp âm thanh vào BytesIO
+    audio_data = BytesIO(audio_file.read())
 
     try:
         if audio_file.filename.endswith('.mp3'):
-            wav_path = os.path.join('uploads', 'uploaded_audio.wav')
-            AudioSegment.from_mp3(audio_path).export(wav_path, format='wav')
-            text = transcribe_audio(wav_path, lang)  # Truyền ngôn ngữ vào hàm
+            # Chuyển đổi MP3 sang WAV
+            audio_segment = AudioSegment.from_mp3(audio_data)
+            wav_data = BytesIO()
+            audio_segment.export(wav_data, format='wav')
+            wav_data.seek(0)  # Đặt con trỏ về đầu tệp
+            text = transcribe_audio(wav_data, lang)
         elif audio_file.filename.endswith('.wav'):
-            text = transcribe_audio(audio_path, lang)  # Truyền ngôn ngữ vào hàm
-        
+            text = transcribe_audio(audio_data, lang)
+
         return jsonify({"text": text}), 200
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        if 'wav_path' in locals() and os.path.exists(wav_path):
-            os.remove(wav_path)
 
 if __name__ == '__main__':
     app.run(debug=True)
